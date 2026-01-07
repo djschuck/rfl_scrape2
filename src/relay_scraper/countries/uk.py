@@ -29,12 +29,9 @@ def _dump(page_num: int, html: str, screenshot_bytes: bytes | None = None) -> No
 
 
 def _try_accept_cookies(page, fetcher: Fetcher) -> None:
-    """
-    CRUK uses OneTrust. The screenshot shows 'I accept cookies'.
-    """
     selectors = [
-        "#onetrust-accept-btn-handler",   # OneTrust standard id
-        "text=I accept cookies",          # matches your banner
+        "#onetrust-accept-btn-handler",
+        "text=I accept cookies",
         "text=Accept cookies",
         "text=Accept all cookies",
         "button:has-text('I accept cookies')",
@@ -60,14 +57,11 @@ def discover_event_urls(
     stop_when_no_new: bool,
 ) -> List[str]:
     """
-    Extract event URLs from the CRUK index.
+    Extract ONLY event teaser links from the index pages, not nav/footer links.
 
-    Important: event links can be either:
-      /get-involved/find-an-event/relay-for-life/relay-for-life-legenderry
-    OR
-      /get-involved/find-an-event/relay-for-life-dundee-2025
-
-    So match prefix '/get-involved/find-an-event/relay-for-life' (no trailing slash requirement).
+    We target:
+      article.node-cruk-event (event teaser)
+      and its <a rel="bookmark" href="..."> inside the <h2>
     """
     found: Set[str] = set()
     no_new_streak = 0
@@ -82,54 +76,58 @@ def discover_event_urls(
             fetcher.log.info("UK Playwright goto page=%s url=%s", pnum, url)
 
             page.goto(url, wait_until="domcontentloaded", timeout=60000)
-            page.wait_for_timeout(1200)
+            page.wait_for_timeout(1000)
 
             _try_accept_cookies(page, fetcher)
-            page.wait_for_timeout(2000)  # allow JS + layout after consent
+
+            # Wait for event list to be present (if it exists on that page)
+            try:
+                page.wait_for_selector("article.node-cruk-event", timeout=15000)
+            except Exception:
+                # If the selector doesn't appear, we still continue and dump debug for early pages.
+                pass
+
+            page.wait_for_timeout(1500)
 
             html = page.content()
             soup = BeautifulSoup(html, "lxml")
 
             before = len(found)
-            matched_this_page = 0
 
-            for a in soup.select("a[href]"):
+            # Primary: event teasers only
+            matched_on_page = 0
+            for a in soup.select("article.node-cruk-event a[rel='bookmark'][href]"):
                 href = (a.get("href") or "").strip()
-                if not href:
+                if not href.startswith("/"):
                     continue
+                full = "https://www.cancerresearchuk.org" + href
+                full = full.split("#")[0]
+                found.add(full)
+                matched_on_page += 1
 
-                # Main UK match: any relay-for-life* page in "find an event"
-                if href.startswith("/get-involved/find-an-event/relay-for-life"):
-                    full = "https://www.cancerresearchuk.org" + href
-                    full = full.split("#")[0]
-                    found.add(full)
-                    matched_this_page += 1
-
-                # Some pages also expose /product/relay-life/<slug>
-                elif href.startswith("/product/relay-life/"):
-                    full = "https://www.cancerresearchuk.org" + href
-                    full = full.split("#")[0]
-                    found.add(full)
-                    matched_this_page += 1
+            # Fallback (only if primary finds nothing): older product-card markup
+            if matched_on_page == 0:
+                for a in soup.select("a.product-card__link[href]"):
+                    href = (a.get("href") or "").strip()
+                    if href.startswith("/"):
+                        full = "https://www.cancerresearchuk.org" + href
+                        found.add(full.split("#")[0])
+                        matched_on_page += 1
 
             fetcher.log.info(
-                "UK Playwright page=%s matched_on_page=%s total=%s",
-                pnum, matched_this_page, len(found)
+                "UK Playwright page=%s matched_on_page=%s discovered_total=%s (+%s)",
+                pnum, matched_on_page, len(found), len(found) - before
             )
 
-            # Dump early pages if we're not matching anything (for debugging)
-            if matched_this_page == 0 and pnum <= page_start + 2:
+            if matched_on_page == 0 and pnum <= page_start + 2:
                 try:
                     shot = page.screenshot(full_page=True)
                 except Exception:
                     shot = None
                 _dump(pnum, html, shot)
-                fetcher.log.warning(
-                    "UK page=%s had 0 matches; dumped rendered HTML + screenshot to out/debug/",
-                    pnum
-                )
+                fetcher.log.warning("UK page=%s had 0 matches; dumped rendered HTML + screenshot to out/debug/", pnum)
 
-            # Stop logic (prevents crawling to page=200 uselessly)
+            # Stop condition
             if len(found) == before:
                 no_new_streak += 1
             else:
