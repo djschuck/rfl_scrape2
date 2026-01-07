@@ -1,64 +1,32 @@
 from __future__ import annotations
 
-from typing import List
-from bs4 import BeautifulSoup
+from dataclasses import dataclass
+from typing import Dict, Iterable, List, Set, Tuple
 
-from relay_scraper.core.fetch import Fetcher
-from relay_scraper.core.models import EventRecord
-from relay_scraper.core.extract import extract_emails
-from relay_scraper.core.normalize import normalize_date
+import requests
 
-US_COUNTRY = "US"
+from relay_scraper.us_api import probe_variant, search_events
 
-def parse_event_entry(fetcher: Fetcher, url: str) -> EventRecord | None:
-    res = fetcher.get_text(url)
-    if res.status_code != 200:
-        return None
 
-    soup = BeautifulSoup(res.text, "lxml")
+def discover_us_event_ids(zip_codes: List[str], radius_miles: int) -> Set[str]:
+    """
+    Use the ACS fundraising API to discover Relay For Life eventIds.
+    """
+    s = requests.Session()
 
-    # Name: best-effort from h1/title
-    h1 = soup.select_one("h1")
-    name = (h1.get_text(" ", strip=True) if h1 else "").strip()
-    if not name:
-        title = soup.select_one("title")
-        name = (title.get_text(" ", strip=True) if title else "").strip()
+    # Probe once using the first ZIP to lock down param names
+    variant = probe_variant(zip_codes[0], radius_miles, session=s)
 
-    # Date: ACS pages vary a lot. Try to find a label containing "Date" or "When"
-    date_raw = ""
-    text = soup.get_text("\n", strip=True)
-    for line in text.splitlines():
-        l = line.strip()
-        if any(k in l.lower() for k in ("event date", "date:", "when:", "when is", "event day")):
-            # take the tail after colon if present
-            if ":" in l:
-                date_raw = l.split(":", 1)[1].strip()
-            else:
-                date_raw = l
-            break
+    event_ids: Set[str] = set()
+    for z in zip_codes:
+        results = search_events(z, radius_miles, variant, session=s)
+        for row in results:
+            eid = str(row.get("eventId") or "").strip()
+            if eid.isdigit():
+                event_ids.add(eid)
 
-    nd = normalize_date(date_raw, US_COUNTRY)
-    emails = sorted(extract_emails(res.text))
+    return event_ids
 
-    if not name and not emails and not nd.raw:
-        return None
 
-    return EventRecord(
-        country=US_COUNTRY,
-        event_name=name or "(unknown)",
-        date_raw=nd.raw,
-        date_iso=nd.iso,
-        emails=emails,
-        source_url=url,
-    )
-
-def scrape(fetcher: Fetcher, config: dict) -> List[EventRecord]:
-    # For now, only parse supplied URLs.
-    # You can implement discovery via Playwright/zip search or search-engine later.
-    entry_urls = config.get("event_entry_urls", [])
-    records: List[EventRecord] = []
-    for u in entry_urls:
-        r = parse_event_entry(fetcher, u)
-        if r:
-            records.append(r)
-    return records
+def event_id_to_str_url(event_id: str) -> str:
+    return f"https://secure.acsevents.org/site/STR?pg=entry&fr_id={event_id}"
