@@ -26,6 +26,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e .
 
+      - name: Install Playwright browsers
+        run: |
+          python -m playwright install chromium
+
       - name: Debug - show repo root
         run: |
           pwd
