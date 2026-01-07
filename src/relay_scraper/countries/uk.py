@@ -19,12 +19,12 @@ def _debug_dir() -> str:
     return d
 
 
-def _dump(page_num: int, html: str, screenshot_bytes: bytes | None = None) -> None:
+def _dump(page_idx: int, html: str, screenshot_bytes: bytes | None = None) -> None:
     d = _debug_dir()
-    with open(os.path.join(d, f"uk_index_rendered_{page_num}.html"), "w", encoding="utf-8") as f:
+    with open(os.path.join(d, f"uk_index_rendered_{page_idx}.html"), "w", encoding="utf-8") as f:
         f.write(html)
     if screenshot_bytes:
-        with open(os.path.join(d, f"uk_index_rendered_{page_num}.png"), "wb") as f:
+        with open(os.path.join(d, f"uk_index_rendered_{page_idx}.png"), "wb") as f:
             f.write(screenshot_bytes)
 
 
@@ -49,20 +49,54 @@ def _try_accept_cookies(page, fetcher: Fetcher) -> None:
     fetcher.log.info("UK cookie accept: no matching button found (may already be accepted).")
 
 
-def discover_event_urls(
-    fetcher: Fetcher,
-    template: str,
-    page_start: int,
-    page_max: int,
-    stop_when_no_new: bool,
-) -> List[str]:
+def _extract_event_urls_from_html(html: str) -> Set[str]:
     """
-    Extract ONLY event teaser links from the index pages, not nav/footer links.
+    Extract event URLs only from the MAIN content to avoid nav/footer repeats.
+    """
+    soup = BeautifulSoup(html, "lxml")
+    main = soup.select_one("main") or soup  # fallback if <main> missing
 
-    We target:
-      article.node-cruk-event (event teaser)
-      and its <a rel="bookmark" href="..."> inside the <h2>
+    urls: Set[str] = set()
+
+    # Primary: event teaser nodes
+    for a in main.select("article.node-cruk-event a[rel='bookmark'][href]"):
+        href = (a.get("href") or "").strip()
+        if href.startswith("/get-involved/find-an-event/relay-for-life"):
+            urls.add("https://www.cancerresearchuk.org" + href.split("#")[0])
+
+    # Fallback: any anchor in main that looks like a relay-for-life event page
+    if not urls:
+        for a in main.select("a[href]"):
+            href = (a.get("href") or "").strip()
+            if href.startswith("/get-involved/find-an-event/relay-for-life") and href != "/get-involved/find-an-event/relay-for-life":
+                urls.add("https://www.cancerresearchuk.org" + href.split("#")[0])
+
+    return urls
+
+
+def _click_next(page) -> bool:
     """
+    Click the 'Next' pagination link if present.
+    Returns True if clicked, False if no next page.
+    """
+    candidates = [
+        "a[rel='next']",
+        "li.pager__item--next a",
+        "a:has-text('Next')",
+        "a:has-text('next')",
+    ]
+    for sel in candidates:
+        try:
+            loc = page.locator(sel)
+            if loc.count() > 0 and loc.first.is_visible():
+                loc.first.click(timeout=5000)
+                return True
+        except Exception:
+            continue
+    return False
+
+
+def discover_event_urls_via_next(fetcher: Fetcher, start_url: str, max_pages: int, stop_when_no_new: bool) -> List[str]:
     found: Set[str] = set()
     no_new_streak = 0
 
@@ -71,64 +105,38 @@ def discover_event_urls(
         page = browser.new_page()
         page.set_viewport_size({"width": 1280, "height": 900})
 
-        for pnum in range(page_start, page_max + 1):
-            url = template.format(page=pnum)
-            fetcher.log.info("UK Playwright goto page=%s url=%s", pnum, url)
+        fetcher.log.info("UK Playwright start url=%s", start_url)
+        page.goto(start_url, wait_until="domcontentloaded", timeout=60000)
+        page.wait_for_timeout(1200)
 
-            page.goto(url, wait_until="domcontentloaded", timeout=60000)
-            page.wait_for_timeout(1000)
+        _try_accept_cookies(page, fetcher)
 
-            _try_accept_cookies(page, fetcher)
-
-            # Wait for event list to be present (if it exists on that page)
+        for page_idx in range(1, max_pages + 1):
+            # Give JS time to populate the list
             try:
-                page.wait_for_selector("article.node-cruk-event", timeout=15000)
+                page.wait_for_selector("main", timeout=15000)
             except Exception:
-                # If the selector doesn't appear, we still continue and dump debug for early pages.
                 pass
-
             page.wait_for_timeout(1500)
 
             html = page.content()
-            soup = BeautifulSoup(html, "lxml")
-
             before = len(found)
 
-            # Primary: event teasers only
-            matched_on_page = 0
-            for a in soup.select("article.node-cruk-event a[rel='bookmark'][href]"):
-                href = (a.get("href") or "").strip()
-                if not href.startswith("/"):
-                    continue
-                full = "https://www.cancerresearchuk.org" + href
-                full = full.split("#")[0]
-                found.add(full)
-                matched_on_page += 1
+            urls = _extract_event_urls_from_html(html)
+            found |= urls
 
-            # Fallback (only if primary finds nothing): older product-card markup
-            if matched_on_page == 0:
-                for a in soup.select("a.product-card__link[href]"):
-                    href = (a.get("href") or "").strip()
-                    if href.startswith("/"):
-                        full = "https://www.cancerresearchuk.org" + href
-                        found.add(full.split("#")[0])
-                        matched_on_page += 1
+            added = len(found) - before
+            fetcher.log.info("UK page_idx=%s extracted=%s total=%s (+%s)", page_idx, len(urls), len(found), added)
 
-            fetcher.log.info(
-                "UK Playwright page=%s matched_on_page=%s discovered_total=%s (+%s)",
-                pnum, matched_on_page, len(found), len(found) - before
-            )
-
-            if matched_on_page == 0 and pnum <= page_start + 2:
+            # Dump first few pages always (for your “careful analysis”)
+            if page_idx <= 3:
                 try:
                     shot = page.screenshot(full_page=True)
                 except Exception:
                     shot = None
-                _dump(pnum, html, shot)
-                fetcher.log.warning("UK page=%s had 0 matches; dumped rendered HTML + screenshot to out/debug/", pnum)
+                _dump(page_idx, html, shot)
 
-            # Stop condition
-            if len(found) == before:
+            if added == 0:
                 no_new_streak += 1
             else:
                 no_new_streak = 0
@@ -137,9 +145,20 @@ def discover_event_urls(
                 fetcher.log.info("UK stopping after %s pages with no new URLs.", no_new_streak)
                 break
 
+            # Move to next page
+            if not _click_next(page):
+                fetcher.log.info("UK no 'Next' pagination link found; stopping.")
+                break
+
+            # Wait for navigation / DOM update
+            page.wait_for_load_state("domcontentloaded", timeout=60000)
+            page.wait_for_timeout(1200)
+
         browser.close()
 
-    return sorted(found)
+    # Filter out obvious non-event / root pages
+    cleaned = sorted(u for u in found if u.count("/") >= 6)
+    return cleaned
 
 
 def extract_event_date(soup: BeautifulSoup) -> str:
@@ -182,15 +201,17 @@ def parse_event_page(fetcher: Fetcher, url: str) -> Optional[EventRecord]:
 
 
 def scrape(fetcher: Fetcher, config: dict) -> List[EventRecord]:
-    urls = discover_event_urls(
+    # Start exactly from the working URL pattern you validated
+    start_url = config.get("start_url") or config["index_url_template"].format(page=int(config.get("page_start", 1)))
+
+    urls = discover_event_urls_via_next(
         fetcher=fetcher,
-        template=config["index_url_template"],
-        page_start=int(config.get("page_start", 1)),
-        page_max=int(config.get("page_max", 200)),
+        start_url=start_url,
+        max_pages=int(config.get("page_max", 200)),
         stop_when_no_new=bool(config.get("stop_when_no_new", True)),
     )
 
-    fetcher.log.info("UK total event urls discovered (Playwright): %s", len(urls))
+    fetcher.log.info("UK total event urls discovered (Playwright-next): %s", len(urls))
 
     records: List[EventRecord] = []
     for u in urls:
