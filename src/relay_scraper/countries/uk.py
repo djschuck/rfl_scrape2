@@ -1,3 +1,5 @@
+# src/relay_scraper/countries/uk.py
+
 from __future__ import annotations
 
 import os
@@ -11,6 +13,8 @@ from relay_scraper.core.extract import extract_emails
 from relay_scraper.core.normalize import normalize_date
 
 UK_COUNTRY = "UK"
+
+UK_EVENT_PREFIX = "https://www.cancerresearchuk.org/get-involved/find-an-event/relay-for-life"
 
 
 def _debug_dir() -> str:
@@ -29,6 +33,9 @@ def _dump(page_idx: int, html: str, screenshot_bytes: bytes | None = None) -> No
 
 
 def _try_accept_cookies(page, fetcher: Fetcher) -> None:
+    """
+    CRUK uses OneTrust. We click the standard OneTrust button id and a few text fallbacks.
+    """
     selectors = [
         "#onetrust-accept-btn-handler",
         "text=I accept cookies",
@@ -51,14 +58,14 @@ def _try_accept_cookies(page, fetcher: Fetcher) -> None:
 
 def _extract_event_urls_from_html(html: str) -> Set[str]:
     """
-    Extract event URLs only from the MAIN content to avoid nav/footer repeats.
+    Extract event URLs only from MAIN content to avoid nav/footer repeats.
     """
     soup = BeautifulSoup(html, "lxml")
     main = soup.select_one("main") or soup  # fallback if <main> missing
 
     urls: Set[str] = set()
 
-    # Primary: event teaser nodes
+    # Primary: event teaser nodes (often present)
     for a in main.select("article.node-cruk-event a[rel='bookmark'][href]"):
         href = (a.get("href") or "").strip()
         if href.startswith("/get-involved/find-an-event/relay-for-life"):
@@ -96,7 +103,16 @@ def _click_next(page) -> bool:
     return False
 
 
-def discover_event_urls_via_next(fetcher: Fetcher, start_url: str, max_pages: int, stop_when_no_new: bool) -> List[str]:
+def discover_event_urls_via_next(
+    fetcher: Fetcher,
+    start_url: str,
+    max_pages: int,
+    stop_when_no_new: bool,
+) -> List[str]:
+    """
+    Loads the CRUK relay-life index and paginates using the on-page 'Next' control
+    (since ?page= can show repeated content). Extracts event URLs from <main>.
+    """
     found: Set[str] = set()
     no_new_streak = 0
 
@@ -126,9 +142,12 @@ def discover_event_urls_via_next(fetcher: Fetcher, start_url: str, max_pages: in
             found |= urls
 
             added = len(found) - before
-            fetcher.log.info("UK page_idx=%s extracted=%s total=%s (+%s)", page_idx, len(urls), len(found), added)
+            fetcher.log.info(
+                "UK page_idx=%s extracted=%s total=%s (+%s)",
+                page_idx, len(urls), len(found), added
+            )
 
-            # Dump first few pages always (for your “careful analysis”)
+            # Dump the first few pages for debugging/traceability
             if page_idx <= 3:
                 try:
                     shot = page.screenshot(full_page=True)
@@ -156,8 +175,15 @@ def discover_event_urls_via_next(fetcher: Fetcher, start_url: str, max_pages: in
 
         browser.close()
 
-    # Filter out obvious non-event / root pages
-    cleaned = sorted(u for u in found if u.count("/") >= 6)
+    # Option A: filter by prefix (no brittle slash-count heuristics)
+    cleaned = sorted(
+        u for u in found
+        if u.startswith(UK_EVENT_PREFIX) and u != UK_EVENT_PREFIX
+    )
+
+    # Useful breadcrumb for logs
+    fetcher.log.info("UK sample urls (post-filter): %s", cleaned[:5])
+
     return cleaned
 
 
@@ -202,7 +228,9 @@ def parse_event_page(fetcher: Fetcher, url: str) -> Optional[EventRecord]:
 
 def scrape(fetcher: Fetcher, config: dict) -> List[EventRecord]:
     # Start exactly from the working URL pattern you validated
-    start_url = config.get("start_url") or config["index_url_template"].format(page=int(config.get("page_start", 1)))
+    start_url = config.get("start_url") or config["index_url_template"].format(
+        page=int(config.get("page_start", 1))
+    )
 
     urls = discover_event_urls_via_next(
         fetcher=fetcher,
