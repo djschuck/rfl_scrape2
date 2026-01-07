@@ -3,8 +3,8 @@ from __future__ import annotations
 import hashlib
 import os
 import time
+import logging
 from dataclasses import dataclass
-from typing import Optional
 
 import httpx
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
@@ -29,12 +29,19 @@ class Fetcher:
         timeout_s: float = 30.0,
         min_delay_s: float = 0.5,
         max_delay_s: float = 2.0,
+        log: logging.Logger | None = None,
+        use_cache: bool = True,
     ) -> None:
         self.cache_dir = cache_dir
         self.timeout_s = timeout_s
         self.min_delay_s = min_delay_s
         self.max_delay_s = max_delay_s
+        self.use_cache = use_cache
+
         os.makedirs(cache_dir, exist_ok=True)
+
+        self.log = log or logging.getLogger("relay_scraper")
+
         self._client = httpx.Client(
             timeout=timeout_s,
             headers={"User-Agent": DEFAULT_UA, "Accept-Language": "en-US,en;q=0.9"},
@@ -62,9 +69,10 @@ class Fetcher:
         retry=retry_if_exception_type((httpx.TimeoutException, httpx.TransportError)),
         reraise=True,
     )
-    def get_text(self, url: str, use_cache: bool = True) -> FetchResult:
+    def get_text(self, url: str) -> FetchResult:
         cache_path = self._cache_path(url)
-        if use_cache and os.path.exists(cache_path):
+
+        if self.use_cache and os.path.exists(cache_path):
             with open(cache_path, "r", encoding="utf-8", errors="ignore") as f:
                 return FetchResult(url=url, status_code=200, text=f.read(), from_cache=True)
 
@@ -72,7 +80,9 @@ class Fetcher:
         resp = self._client.get(url)
         text = resp.text
 
-        if use_cache and resp.status_code == 200 and len(text) > 200:
+        self.log.info("GET %s status=%s bytes=%s", url, resp.status_code, len(text))
+
+        if self.use_cache and resp.status_code == 200 and len(text) > 200:
             with open(cache_path, "w", encoding="utf-8") as f:
                 f.write(text)
 
