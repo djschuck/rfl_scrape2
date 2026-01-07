@@ -33,4 +33,17 @@ jobs:
           echo "---- find seeds.yml ----"
           find . -maxdepth 3 -type f -name "seeds.yml" -print
 
-      - name: R
+      - name: Run scraper
+        env:
+          PYTHONUNBUFFERED: "1"
+        run: |
+          mkdir -p out
+          relay-scrape --config seeds.yml --countries AU,UK,US --out out/events.csv --json out/events.json --log out/scrape.log
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: relay-events
+          path: out/
+          if-no-files-found: error
+          retention-days: 14
