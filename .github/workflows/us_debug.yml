@@ -1,0 +1,52 @@
+name: US ZIP Search Debug (Capture Network)
+
+on:
+  workflow_dispatch:
+    inputs:
+      zip:
+        description: "ZIP code to test"
+        required: true
+        default: "10001"
+      headless:
+        description: "Run headless (true/false)"
+        required: true
+        default: "true"
+
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install package
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+
+      - name: Install Playwright browsers
+        run: |
+          python -m playwright install chromium
+
+      - name: Capture network traffic
+        env:
+          PYTHONUNBUFFERED: "1"
+        run: |
+          mkdir -p out
+          python scripts/us_capture_zip_network.py --zip "${{ inputs.zip }}" --out out/us_network.jsonl ${{ inputs.headless == 'true' && '--headless' || '' }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: us-network-capture
+          path: out/us_network.jsonl
+          if-no-files-found: error
+          retention-days: 14
