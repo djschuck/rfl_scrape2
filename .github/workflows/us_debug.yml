@@ -50,6 +50,7 @@ jobs:
             > out/us_network_summary.txt
 
       - name: Upload artifact
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: us-network-capture
@@ -58,6 +59,7 @@ jobs:
             out/us_network_summary.txt
             out/us_debug_page.html
             out/us_debug_page.png
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 14
+
 
