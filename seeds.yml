@@ -12,11 +12,16 @@ countries:
     page_max: 200
     stop_when_no_new: true
 
-  US:
-    event_entry_urls:
-      - "https://secure.acsevents.org/site/STR?fr_id=111060&pg=entry"
-      - "https://secure.acsevents.org/site/STR?fr_id=111541&pg=entry"
-    use_browser: true
+US:
+  enabled: true
+  radius_miles: 50
+  zip_codes:
+    - "10001"
+    - "30301"
+    - "60601"
+    - "73301"
+    - "94105"
+    # ...you will expand this list for national coverage
 
   CA:
     school_index_urls:
