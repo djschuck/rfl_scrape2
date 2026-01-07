@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import re
 from typing import List, Set, Optional
 from bs4 import BeautifulSoup
 from playwright.sync_api import sync_playwright
@@ -13,16 +12,12 @@ from relay_scraper.core.normalize import normalize_date
 
 UK_COUNTRY = "UK"
 
-# Accept both URL shapes
-UK_EVENT_PATTERNS = (
-    "/product/relay-life/",
-    "/get-involved/find-an-event/relay-for-life/",
-)
 
 def _debug_dir() -> str:
     d = os.environ.get("RELAY_DEBUG_DIR", "out/debug")
     os.makedirs(d, exist_ok=True)
     return d
+
 
 def _dump(page_num: int, html: str, screenshot_bytes: bytes | None = None) -> None:
     d = _debug_dir()
@@ -32,32 +27,54 @@ def _dump(page_num: int, html: str, screenshot_bytes: bytes | None = None) -> No
         with open(os.path.join(d, f"uk_index_rendered_{page_num}.png"), "wb") as f:
             f.write(screenshot_bytes)
 
-def _try_accept_cookies(page) -> None:
-    # Try several common button texts/roles; ignore failures.
-    candidates = [
-        "text=Accept all cookies",
+
+def _try_accept_cookies(page, fetcher: Fetcher) -> None:
+    """
+    CRUK uses OneTrust. The screenshot shows 'I accept cookies'.
+    """
+    selectors = [
+        "#onetrust-accept-btn-handler",   # OneTrust standard id
+        "text=I accept cookies",          # matches your banner
         "text=Accept cookies",
-        "text=Accept all",
-        "text=I accept",
-        "text=Agree",
+        "text=Accept all cookies",
+        "button:has-text('I accept cookies')",
     ]
-    for sel in candidates:
+    for sel in selectors:
         try:
-            if page.locator(sel).count() > 0:
-                page.locator(sel).first.click(timeout=2000)
-                page.wait_for_timeout(1000)
+            loc = page.locator(sel)
+            if loc.count() > 0:
+                loc.first.click(timeout=3000)
+                page.wait_for_timeout(800)
+                fetcher.log.info("UK clicked cookie accept via selector: %s", sel)
                 return
         except Exception:
-            pass
+            continue
+    fetcher.log.info("UK cookie accept: no matching button found (may already be accepted).")
 
-def discover_event_urls(fetcher: Fetcher, template: str, page_start: int, page_max: int) -> List[str]:
+
+def discover_event_urls(
+    fetcher: Fetcher,
+    template: str,
+    page_start: int,
+    page_max: int,
+    stop_when_no_new: bool,
+) -> List[str]:
+    """
+    Extract event URLs from the CRUK index.
+
+    Important: event links can be either:
+      /get-involved/find-an-event/relay-for-life/relay-for-life-legenderry
+    OR
+      /get-involved/find-an-event/relay-for-life-dundee-2025
+
+    So match prefix '/get-involved/find-an-event/relay-for-life' (no trailing slash requirement).
+    """
     found: Set[str] = set()
+    no_new_streak = 0
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         page = browser.new_page()
-
-        # Reduce noise / speed up
         page.set_viewport_size({"width": 1280, "height": 900})
 
         for pnum in range(page_start, page_max + 1):
@@ -65,28 +82,32 @@ def discover_event_urls(fetcher: Fetcher, template: str, page_start: int, page_m
             fetcher.log.info("UK Playwright goto page=%s url=%s", pnum, url)
 
             page.goto(url, wait_until="domcontentloaded", timeout=60000)
-            page.wait_for_timeout(1500)
+            page.wait_for_timeout(1200)
 
-            _try_accept_cookies(page)
-            page.wait_for_timeout(2500)  # allow JS render
+            _try_accept_cookies(page, fetcher)
+            page.wait_for_timeout(2000)  # allow JS + layout after consent
 
             html = page.content()
             soup = BeautifulSoup(html, "lxml")
 
+            before = len(found)
             matched_this_page = 0
+
             for a in soup.select("a[href]"):
                 href = (a.get("href") or "").strip()
                 if not href:
                     continue
-                if any(pat in href for pat in UK_EVENT_PATTERNS):
-                    # Normalize absolute URL
-                    if href.startswith("/"):
-                        full = "https://www.cancerresearchuk.org" + href
-                    elif href.startswith("http"):
-                        full = href
-                    else:
-                        continue
-                    # De-dup fragments
+
+                # Main UK match: any relay-for-life* page in "find an event"
+                if href.startswith("/get-involved/find-an-event/relay-for-life"):
+                    full = "https://www.cancerresearchuk.org" + href
+                    full = full.split("#")[0]
+                    found.add(full)
+                    matched_this_page += 1
+
+                # Some pages also expose /product/relay-life/<slug>
+                elif href.startswith("/product/relay-life/"):
+                    full = "https://www.cancerresearchuk.org" + href
                     full = full.split("#")[0]
                     found.add(full)
                     matched_this_page += 1
@@ -96,22 +117,32 @@ def discover_event_urls(fetcher: Fetcher, template: str, page_start: int, page_m
                 pnum, matched_this_page, len(found)
             )
 
-            # Dump early pages if we're not finding anything
+            # Dump early pages if we're not matching anything (for debugging)
             if matched_this_page == 0 and pnum <= page_start + 2:
                 try:
                     shot = page.screenshot(full_page=True)
                 except Exception:
                     shot = None
                 _dump(pnum, html, shot)
-                fetcher.log.warning("UK page=%s had 0 matches; dumped rendered HTML + screenshot to out/debug/", pnum)
+                fetcher.log.warning(
+                    "UK page=%s had 0 matches; dumped rendered HTML + screenshot to out/debug/",
+                    pnum
+                )
 
-            # Stop early once pages go empty after we’ve started finding some
-            if matched_this_page == 0 and len(found) > 0:
+            # Stop logic (prevents crawling to page=200 uselessly)
+            if len(found) == before:
+                no_new_streak += 1
+            else:
+                no_new_streak = 0
+
+            if stop_when_no_new and no_new_streak >= 3:
+                fetcher.log.info("UK stopping after %s pages with no new URLs.", no_new_streak)
                 break
 
         browser.close()
 
     return sorted(found)
+
 
 def extract_event_date(soup: BeautifulSoup) -> str:
     label = soup.find(string=lambda s: isinstance(s, str) and s.strip().lower() == "event date")
@@ -124,6 +155,7 @@ def extract_event_date(soup: BeautifulSoup) -> str:
             return txt.strip()
         nxt = nxt.find_next()
     return ""
+
 
 def parse_event_page(fetcher: Fetcher, url: str) -> Optional[EventRecord]:
     res = fetcher.get_text(url)
@@ -150,12 +182,14 @@ def parse_event_page(fetcher: Fetcher, url: str) -> Optional[EventRecord]:
         source_url=url,
     )
 
+
 def scrape(fetcher: Fetcher, config: dict) -> List[EventRecord]:
     urls = discover_event_urls(
         fetcher=fetcher,
         template=config["index_url_template"],
         page_start=int(config.get("page_start", 1)),
         page_max=int(config.get("page_max", 200)),
+        stop_when_no_new=bool(config.get("stop_when_no_new", True)),
     )
 
     fetcher.log.info("UK total event urls discovered (Playwright): %s", len(urls))
