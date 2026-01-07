@@ -1,0 +1,36 @@
+
+---
+
+## 3) `seeds.yml`
+```yaml
+countries:
+  AU:
+    index_urls:
+      - "https://www.relayforlife.org.au/events"
+    # Only follow links that match this pattern
+    event_url_contains:
+      - "/event/"
+    # Some sites put emails behind accordions; AU often has CF-protected emails
+    use_browser: false
+
+  UK:
+    # We'll crawl pages by incrementing ?page=
+    index_url_template: "https://www.cancerresearchuk.org/product/relay-life?page={page}&advagg=0"
+    page_start: 0
+    page_max: 80         # adjust upward as needed
+    stop_when_no_new: true
+    event_url_contains:
+      - "/get-involved/find-an-event/relay-for-life/"
+
+  US:
+    # Placeholder: add known event entry pages here or implement discovery
+    event_entry_urls:
+      - "https://secure.acsevents.org/site/STR?fr_id=111060&pg=entry"
+      - "https://secure.acsevents.org/site/STR?fr_id=111541&pg=entry"
+    use_browser: true
+
+  CA:
+    school_index_urls:
+      - "https://support.cancer.ca/site/PageServer?pagename=RFLY_NW_Events"
+    community_index_urls:
+      - "https://support.cancer.ca/site/PageServer?pagename=RFL_NW_Events"
