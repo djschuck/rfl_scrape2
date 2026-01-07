@@ -43,10 +43,19 @@ jobs:
           mkdir -p out
           python scripts/us_capture_zip_network.py --zip "${{ inputs.zip }}" --out out/us_network.jsonl ${{ inputs.headless == 'true' && '--headless' || '' }}
 
+      - name: Summarize network capture
+        run: |
+          python scripts/us_summarize_network.py \
+            --in out/us_network.jsonl \
+            > out/us_network_summary.txt
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: us-network-capture
-          path: out/us_network.jsonl
+          path: |
+            out/us_network.jsonl
+            out/us_network_summary.txt
           if-no-files-found: error
           retention-days: 14
+
