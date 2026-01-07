@@ -8,7 +8,7 @@ import json
 import re
 import time
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 from playwright.sync_api import sync_playwright
 
@@ -51,6 +51,19 @@ def b64_bytes(b: Optional[bytes], limit: int = 200_000) -> str:
     return base64.b64encode(b).decode("ascii")
 
 
+def dump_debug(page, html_path: str, png_path: str) -> None:
+    Path(html_path).parent.mkdir(parents=True, exist_ok=True)
+    Path(png_path).parent.mkdir(parents=True, exist_ok=True)
+    try:
+        Path(html_path).write_text(page.content(), encoding="utf-8")
+    except Exception:
+        pass
+    try:
+        page.screenshot(path=png_path, full_page=True)
+    except Exception:
+        pass
+
+
 def try_accept_cookies(page) -> None:
     for sel in [
         "#onetrust-accept-btn-handler",
@@ -69,76 +82,104 @@ def try_accept_cookies(page) -> None:
             pass
 
 
-def find_zip_input(page):
+def click_join_button(page) -> bool:
     """
-    Try a bunch of likely selectors. ACS pages vary.
-    We return a Locator or None.
+    Try clicking something that triggers the ZIP search UI.
+    Returns True if clicked.
     """
-    selectors = [
-        # explicit attributes
-        "input[name*='zip' i]",
-        "input[id*='zip' i]",
-        "input[placeholder*='zip' i]",
-        "input[aria-label*='zip' i]",
-        # common input types
-        "input[type='search']",
-        "input[type='text']",
-        # sometimes it's a generic input in a form near the Join button
-        "form input",
-        # fallback: any input at all
-        "input",
+    patterns = [
+        ("role", None),
+        ("css", "button:has-text('Join a Relay')"),
+        ("css", "button:has-text('Join')"),
+        ("css", "a:has-text('Join a Relay')"),
+        ("css", "a:has-text('Join')"),
+        ("css", "[role='button']:has-text('Join a Relay')"),
+        ("css", "[role='button']:has-text('Join')"),
     ]
-    for sel in selectors:
-        try:
-            loc = page.locator(sel)
-            if loc.count() > 0:
-                # pick the first visible enabled one
-                for i in range(min(loc.count(), 10)):
-                    cand = loc.nth(i)
-                    try:
-                        if cand.is_visible() and cand.is_enabled():
-                            return cand
-                    except Exception:
-                        continue
-        except Exception:
-            continue
-    return None
 
-
-def click_join_button(page) -> None:
-    # Prefer accessible role/name, but include fallbacks.
+    # role-based first
     try:
-        page.get_by_role("button", name=re.compile(r"join a relay", re.I)).click(timeout=10_000)
-        return
+        page.get_by_role("button", name=re.compile(r"join a relay", re.I)).click(timeout=8000)
+        return True
     except Exception:
         pass
 
-    # Fallback: anything button-like containing join
-    for sel in [
-        "button:has-text('Join a Relay')",
-        "button:has-text('Join')",
-        "a:has-text('Join a Relay')",
-        "a:has-text('Join')",
-        "[role='button']:has-text('Join a Relay')",
-        "[role='button']:has-text('Join')",
-    ]:
+    for _, sel in patterns[1:]:
         try:
             loc = page.locator(sel)
             if loc.count() > 0 and loc.first.is_visible():
-                loc.first.click(timeout=10_000)
-                return
+                loc.first.click(timeout=8000)
+                return True
         except Exception:
             continue
 
-    raise RuntimeError("Could not find a 'Join' button with any selector.")
+    return False
+
+
+ZIP_SELECTORS = [
+    "input[name*='zip' i]",
+    "input[id*='zip' i]",
+    "input[placeholder*='zip' i]",
+    "input[aria-label*='zip' i]",
+    "input[type='search']",
+    "input[type='text']",
+    "input",
+]
+
+
+def find_zip_input_any_frame(page):
+    """
+    Search for an input across all frames (including iframes).
+    Returns (frame, locator) or (None, None).
+    """
+    for frame in page.frames:
+        for sel in ZIP_SELECTORS:
+            try:
+                loc = frame.locator(sel)
+                if loc.count() == 0:
+                    continue
+                # prefer visible enabled candidates
+                for i in range(min(loc.count(), 15)):
+                    cand = loc.nth(i)
+                    try:
+                        if cand.is_visible() and cand.is_enabled():
+                            # Heuristic: if placeholder/aria/name mentions zip, pick immediately
+                            attrs = ""
+                            try:
+                                attrs = (cand.get_attribute("placeholder") or "") + " " + (cand.get_attribute("aria-label") or "") + " " + (cand.get_attribute("name") or "") + " " + (cand.get_attribute("id") or "")
+                                attrs = attrs.lower()
+                            except Exception:
+                                attrs = ""
+                            if "zip" in attrs:
+                                return frame, cand
+                    except Exception:
+                        continue
+            except Exception:
+                continue
+
+    # Second pass: any visible input in any frame
+    for frame in page.frames:
+        try:
+            loc = frame.locator("input")
+            for i in range(min(loc.count(), 20)):
+                cand = loc.nth(i)
+                try:
+                    if cand.is_visible() and cand.is_enabled():
+                        return frame, cand
+                except Exception:
+                    continue
+        except Exception:
+            continue
+
+    return None, None
 
 
 def main() -> int:
-    p = argparse.ArgumentParser(description="Capture ACS ZIP-search network traffic via Playwright.")
+    p = argparse.ArgumentParser(description="Capture ACS ZIP-search network traffic via Playwright (iframe-aware).")
     p.add_argument("--zip", dest="zip_code", default="10001", help="ZIP code to test (default 10001).")
     p.add_argument("--out", default="out/us_network.jsonl", help="Output JSONL file path.")
-    p.add_argument("--headless", action="store_true", help="Run browser headless (default: headed).")
-    p.add_argument("--wait", type=float, default=10.0, help="Seconds to wait after clicking (default: 10).")
+    p.add_argument("--headless", action="store_true", help="Run browser headless.")
+    p.add_argument("--wait", type=float, default=12.0, help="Seconds to wait after clicking (default: 12).")
     p.add_argument("--debug-html", default="out/us_debug_page.html", help="Write page HTML here on failure.")
     p.add_argument("--debug-png", default="out/us_debug_page.png", help="Write screenshot here on failure.")
     args = p.parse_args()
@@ -160,37 +201,30 @@ def main() -> int:
                 request_id += 1
                 post_text = ""
                 post_b64 = ""
-
-                # IMPORTANT: req.post_data can raise UnicodeDecodeError internally.
-                # Use buffer form safely.
                 try:
                     buf = req.post_data_buffer
                     if buf:
-                        # try utf-8 decode; if not, store base64
                         try:
                             post_text = buf.decode("utf-8", errors="strict")
                         except Exception:
                             post_b64 = b64_bytes(buf)
                 except Exception:
-                    # As a fallback, try plain post_data but guard it
-                    try:
-                        post_text = req.post_data or ""
-                    except Exception:
-                        post_text = ""
+                    pass
 
-                rec = {
-                    "type": "request",
-                    "id": request_id,
-                    "ts": time.time(),
-                    "method": req.method,
-                    "url": req.url,
-                    "resource_type": req.resource_type,
-                    "headers": dict(req.headers),
-                    "post_data": safe_text(post_text),
-                    "post_data_b64": post_b64,
-                    "interesting": looks_interesting(req.url),
-                }
-                events.append(rec)
+                events.append(
+                    {
+                        "type": "request",
+                        "id": request_id,
+                        "ts": time.time(),
+                        "method": req.method,
+                        "url": req.url,
+                        "resource_type": req.resource_type,
+                        "headers": dict(req.headers),
+                        "post_data": safe_text(post_text),
+                        "post_data_b64": post_b64,
+                        "interesting": looks_interesting(req.url),
+                    }
+                )
             except Exception as e:
                 events.append({"type": "request_error", "ts": time.time(), "error": repr(e)})
 
@@ -204,8 +238,6 @@ def main() -> int:
                     "headers": dict(resp.headers),
                     "interesting": looks_interesting(resp.url),
                 }
-
-                # Try to capture body for XHR/fetch or anything "interesting"
                 try:
                     ct = (resp.headers.get("content-type") or "").lower()
                     if resp.request.resource_type in ("xhr", "fetch") or looks_interesting(resp.url):
@@ -227,36 +259,41 @@ def main() -> int:
         page.on("response", on_response)
 
         page.goto(START_URL, wait_until="domcontentloaded", timeout=60_000)
-        page.wait_for_timeout(2000)
+        page.wait_for_timeout(2500)
 
         try_accept_cookies(page)
+        page.wait_for_timeout(1000)
 
-        # Make sure the page is settled a bit
-        page.wait_for_timeout(1500)
+        # IMPORTANT: On ACS, the ZIP UI may only appear after clicking "Join a Relay"
+        clicked = click_join_button(page)
+        page.wait_for_timeout(2500)
 
-        zip_input = find_zip_input(page)
+        # Search for ZIP input across frames
+        frame, zip_input = find_zip_input_any_frame(page)
         if not zip_input:
-            # Dump debug
-            Path(args.debug_html).parent.mkdir(parents=True, exist_ok=True)
-            Path(args.debug_png).parent.mkdir(parents=True, exist_ok=True)
-            try:
-                Path(args.debug_html).write_text(page.content(), encoding="utf-8")
-            except Exception:
-                pass
-            try:
-                page.screenshot(path=args.debug_png, full_page=True)
-            except Exception:
-                pass
-            raise RuntimeError("Could not locate a ZIP input field on the page (see debug HTML/PNG).")
+            # As a last attempt: scroll and retry after a moment (lazy-loaded)
+            page.mouse.wheel(0, 1200)
+            page.wait_for_timeout(2000)
+            frame, zip_input = find_zip_input_any_frame(page)
 
-        # Fill ZIP
+        if not zip_input:
+            dump_debug(page, args.debug_html, args.debug_png)
+            # Still write whatever we captured so far, for debugging.
+            with out_path.open("w", encoding="utf-8") as f:
+                for e in events:
+                    f.write(json.dumps(e, ensure_ascii=False) + "\n")
+            raise RuntimeError("Could not locate a ZIP input field on the page (see out/us_debug_page.html/png).")
+
+        # Fill ZIP (use the frame locator we found)
         zip_input.click(timeout=5000)
         zip_input.fill(args.zip_code, timeout=10_000)
 
-        # Click Join
-        click_join_button(page)
+        # If clicking Join opened a modal, there may be a separate "Search" / "Find" submit button.
+        # Click Join again to trigger the XHR if needed.
+        if clicked:
+            page.wait_for_timeout(500)
+        _ = click_join_button(page)
 
-        # Wait for results + XHRs
         page.wait_for_timeout(int(args.wait * 1000))
 
         # Save JSONL
@@ -265,7 +302,6 @@ def main() -> int:
                 f.write(json.dumps(e, ensure_ascii=False) + "\n")
 
         print(f"Wrote {len(events)} network records to {out_path}")
-
         browser.close()
 
     return 0
