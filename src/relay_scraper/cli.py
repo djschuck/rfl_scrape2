@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import argparse
 import sys
+import os
+import logging
 from typing import Dict, List
 
 import yaml
@@ -33,8 +35,29 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
     p.add_argument("--countries", default="AU,UK", help="Comma-separated list, e.g. AU,UK,US,CA")
     p.add_argument("--out", default="out/events.csv", help="CSV output path")
     p.add_argument("--json", default="", help="Optional JSON output path")
+    p.add_argument("--log", default="out/scrape.log", help="Log output path")
     p.add_argument("--no-cache", action="store_true", help="Disable HTTP cache")
     return p.parse_args(argv)
+
+def setup_logging(log_path: str) -> logging.Logger:
+    os.makedirs(os.path.dirname(log_path) or ".", exist_ok=True)
+    logger = logging.getLogger("relay_scraper")
+    logger.setLevel(logging.INFO)
+    logger.handlers.clear()
+
+    fmt = logging.Formatter("%(asctime)s %(levelname)s %(message)s")
+
+    # stdout
+    sh = logging.StreamHandler(sys.stdout)
+    sh.setFormatter(fmt)
+    logger.addHandler(sh)
+
+    # file
+    fh = logging.FileHandler(log_path, encoding="utf-8")
+    fh.setFormatter(fmt)
+    logger.addHandler(fh)
+
+    return logger
 
 def render_preview(records: List[EventRecord], limit: int = 20) -> None:
     t = Table(title=f"Preview (first {min(limit, len(records))} of {len(records)})")
@@ -49,6 +72,8 @@ def render_preview(records: List[EventRecord], limit: int = 20) -> None:
 
 def main(argv: List[str] | None = None) -> int:
     args = parse_args(argv or sys.argv[1:])
+    log = setup_logging(args.log)
+
     cfg = load_config(args.config)
     countries_cfg = cfg.get("countries", {})
 
@@ -58,16 +83,16 @@ def main(argv: List[str] | None = None) -> int:
         console.print(f"[red]Unknown country codes:[/red] {unknown}")
         return 2
 
-    fetcher = Fetcher()
+    fetcher = Fetcher(log=log, use_cache=not args.no_cache)
     all_records: List[EventRecord] = []
 
     try:
         for c in selected:
             driver = COUNTRY_DRIVERS[c]
             c_cfg = countries_cfg.get(c, {})
-            console.print(f"[bold]Scraping {c}[/bold] ...")
+            log.info("Scraping %s ...", c)
             recs = driver(fetcher, c_cfg)
-            console.print(f"  found {len(recs)} records")
+            log.info("%s records: %s", c, len(recs))
             all_records.extend(recs)
     finally:
         fetcher.close()
@@ -83,9 +108,10 @@ def main(argv: List[str] | None = None) -> int:
         write_json(args.json, records)
 
     render_preview(records)
-    console.print(f"[green]Wrote CSV:[/green] {args.out}")
+    log.info("Wrote CSV: %s", args.out)
     if args.json:
-        console.print(f"[green]Wrote JSON:[/green] {args.json}")
+        log.info("Wrote JSON: %s", args.json)
+    log.info("Wrote LOG: %s", args.log)
     return 0
 
 if __name__ == "__main__":
