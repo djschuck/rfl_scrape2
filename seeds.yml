@@ -7,15 +7,10 @@ countries:
     use_browser: false
 
   UK:
-    # The index is reachable without page=; it has pagination links inside.
-    index_url_template: "https://www.cancerresearchuk.org/product/relay-life?page={page}"
-    page_start: 0
-    page_max: 120
+    index_url_template: "https://www.cancerresearchuk.org/product/relay-life?page={page}&advagg=0"
+    page_start: 1
+    page_max: 200
     stop_when_no_new: true
-    # IMPORTANT: index links are often /product/relay-life/... which redirect to /get-involved/find-an-event/relay-for-life/...
-    event_url_contains:
-      - "/product/relay-life/"
-      - "/get-involved/find-an-event/relay-for-life/"
 
   US:
     event_entry_urls:
