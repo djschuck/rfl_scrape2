@@ -42,7 +42,7 @@ jobs:
           PYTHONUNBUFFERED: "1"
         run: |
           mkdir -p out
-          relay-scrape --config seeds.yml --countries AU,UK,US --out out/events.csv --json out/events.json --log out/scrape.log
+          relay-scrape --config seeds.yml --countries AU,UK,US,CA --out out/events.csv --json out/events.json --log out/scrape.log
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
