@@ -149,7 +149,7 @@ def scrape(fetcher: Fetcher, config: Dict[str, Any]) -> List[EventRecord]:
     """
     fetcher.log.info("US raw config received: %r", config)
     if isinstance(config, dict):
-    fetcher.log.info("US config keys: %s", sorted(config.keys()))
+        fetcher.log.info("US config keys: %s", sorted(config.keys()))
 
     us_cfg = config
     # If the caller passed the entire seeds dict, accept nested US config too.
