@@ -37,7 +37,7 @@ def discover_event_ids(fetcher: Fetcher, zip_codes: List[str], radius_miles: int
                     event_ids.add(eid)
         except Exception as e:
             fetcher.log.warning("US zip=%s API search failed: %r", z, e)
-
+        time.sleep(0.25)
     return event_ids
 
 
