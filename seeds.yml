@@ -21,7 +21,6 @@ US:
     - "60601"
     - "73301"
     - "94105"
-    # ...you will expand this list for national coverage
 
   CA:
     school_index_urls:
