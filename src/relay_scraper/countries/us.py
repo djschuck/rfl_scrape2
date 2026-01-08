@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Set
+import json
+import re
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from bs4 import BeautifulSoup
 
@@ -18,16 +20,10 @@ def event_id_to_str_url(event_id: str) -> str:
 
 
 def discover_event_ids(fetcher: Fetcher, zip_codes: List[str], radius_miles: int) -> Set[str]:
-    """
-    Discover Relay For Life event IDs using the ACS fundraising API.
-    """
     if not zip_codes:
         return set()
 
-    # We use requests internally in us_api; but the Fetcher logger is what we want for consistency.
     fetcher.log.info("US probing fundraising API using zip=%s radius=%s", zip_codes[0], radius_miles)
-
-    # Probe once to find the correct parameter variant; then reuse for all zips.
     variant = probe_variant(zip_codes[0], radius_miles)
 
     event_ids: Set[str] = set()
@@ -46,14 +42,12 @@ def discover_event_ids(fetcher: Fetcher, zip_codes: List[str], radius_miles: int
 
 
 def _extract_event_name(soup: BeautifulSoup) -> str:
-    # Most ACS pages have an h1 with the event name
     h1 = soup.select_one("h1")
     if h1:
         txt = h1.get_text(" ", strip=True)
         if txt:
             return txt
 
-    # Fallback: title
     title = soup.select_one("title")
     if title:
         txt = title.get_text(" ", strip=True)
@@ -63,51 +57,100 @@ def _extract_event_name(soup: BeautifulSoup) -> str:
     return "(unknown)"
 
 
-def _extract_event_date_raw(soup: BeautifulSoup) -> str:
+def _jsonld_candidates(html: str) -> List[Dict[str, Any]]:
     """
-    Try a few common ACS patterns.
-    We keep it flexible because US pages vary and sometimes say TBD/TBA.
+    Parse any application/ld+json blocks, returning a list of dict objects.
+    Fail-closed: returns [] if parsing fails.
     """
-    # Strategy 1: look for label-ish text then nearby content
-    label_candidates = [
-        "Event Date",
-        "Date",
-        "When",
-        "Relay Date",
-    ]
-    for lab in label_candidates:
-        node = soup.find(string=lambda s: isinstance(s, str) and lab.lower() in s.strip().lower())
-        if node:
-            # walk forward a little to find a meaningful text chunk
-            cur = node.parent
-            for _ in range(10):
-                if not cur:
-                    break
-                txt = cur.get_text(" ", strip=True)
-                if txt and txt.lower() not in {lab.lower()} and len(txt) <= 120:
-                    # Often contains "Event Date: May 2, 2026"
-                    # We return the whole line; normalize_date will interpret.
-                    return txt
-                cur = cur.find_next()
+    soup = BeautifulSoup(html, "lxml")
+    blocks = soup.select("script[type='application/ld+json']")
+    out: List[Dict[str, Any]] = []
+    for b in blocks:
+        raw = (b.string or "").strip()
+        if not raw:
+            continue
+        try:
+            data = json.loads(raw)
+            if isinstance(data, dict):
+                out.append(data)
+            elif isinstance(data, list):
+                out.extend([x for x in data if isinstance(x, dict)])
+        except Exception:
+            continue
+    return out
 
-    # Strategy 2: meta / structured hints (sometimes)
-    for sel in [
-        "[data-testid*='event-date']",
-        ".event-date",
-        ".eventDetailsDate",
-    ]:
-        el = soup.select_one(sel)
-        if el:
-            txt = el.get_text(" ", strip=True)
-            if txt:
-                return txt
 
-    # Strategy 3: global regex-ish fallback: find a date-like phrase in body text
+def _extract_date_from_jsonld(html: str) -> Optional[str]:
+    """
+    Try to find startDate/endDate in JSON-LD.
+    Returns a string (ISO date/time or similar) or None.
+    """
+    for obj in _jsonld_candidates(html):
+        # Common schema.org keys
+        start = obj.get("startDate") or obj.get("start_date") or obj.get("start")
+        end = obj.get("endDate") or obj.get("end_date") or obj.get("end")
+        if isinstance(start, str) and start.strip():
+            if isinstance(end, str) and end.strip():
+                return f"{start.strip()} - {end.strip()}"
+            return start.strip()
+    return None
+
+
+_EVENT_DATE_LINE_RE = re.compile(
+    r"(Event\s*Date|Relay\s*Date|Date)\s*[:\-]\s*([^\r\n<]{3,120})",
+    re.IGNORECASE,
+)
+
+# A loose month-name matcher for fallback scanning
+_MONTH_RE = re.compile(
+    r"\b(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|"
+    r"Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\b",
+    re.IGNORECASE,
+)
+
+
+def _extract_date_from_visible_text(soup: BeautifulSoup) -> Optional[str]:
+    """
+    Extract date-ish content from visible text lines.
+    """
     text = soup.get_text("\n", strip=True)
-    # Keep it simple: let normalize_date do heavy lifting
-    for marker in ["TBD", "TBA", "TBC"]:
-        if marker in text:
+
+    # Handle explicit TBD/TBA/TBC
+    for marker in ("TBD", "TBA", "TBC"):
+        if re.search(rf"\b{marker}\b", text):
             return marker
+
+    # Look for "Event Date: ...."
+    m = _EVENT_DATE_LINE_RE.search(text)
+    if m:
+        return m.group(2).strip()
+
+    # Fallback: find a line that looks date-like (contains a month name)
+    for line in text.splitlines():
+        line = line.strip()
+        if 6 <= len(line) <= 120 and _MONTH_RE.search(line):
+            # Avoid obvious non-date lines
+            if "registration" in line.lower():
+                continue
+            return line
+
+    return None
+
+
+def _extract_event_date_raw(html: str, soup: BeautifulSoup, event_name: str) -> str:
+    """
+    Date extraction specifically tuned for ACS STR pages.
+    """
+    # 1) JSON-LD is often the cleanest
+    d = _extract_date_from_jsonld(html)
+    if d and d.strip() and d.strip() != event_name.strip():
+        return d.strip()
+
+    # 2) Visible text heuristic
+    d = _extract_date_from_visible_text(soup)
+    if d and d.strip() and d.strip() != event_name.strip():
+        return d.strip()
+
     return ""
 
 
@@ -117,13 +160,14 @@ def parse_event_page(fetcher: Fetcher, url: str) -> Optional[EventRecord]:
         fetcher.log.warning("US event fetch failed: %s status=%s", url, res.status_code)
         return None
 
-    soup = BeautifulSoup(res.text, "lxml")
+    html = res.text
+    soup = BeautifulSoup(html, "lxml")
 
     name = _extract_event_name(soup)
-    date_raw = _extract_event_date_raw(soup)
+    date_raw = _extract_event_date_raw(html, soup, name)
     nd = normalize_date(date_raw, US_COUNTRY)
 
-    emails = sorted(extract_emails(res.text))
+    emails = sorted(extract_emails(html))
 
     return EventRecord(
         country=US_COUNTRY,
@@ -134,24 +178,13 @@ def parse_event_page(fetcher: Fetcher, url: str) -> Optional[EventRecord]:
         source_url=url,
     )
 
-def scrape(fetcher: Fetcher, config: Dict[str, Any]) -> List[EventRecord]:
-    """
-    Entrypoint used by cli.py: {"US": us.scrape}
-    Config expected in seeds.yml:
 
-    US:
-      enabled: true
-      radius_miles: 50
-      zip_codes:
-        - "10001"
-        - "30301"
-    """
+def scrape(fetcher: Fetcher, config: Dict[str, Any]) -> List[EventRecord]:
     fetcher.log.info("US raw config received: %r", config)
     if isinstance(config, dict):
         fetcher.log.info("US config keys: %s", sorted(config.keys()))
 
     us_cfg = config
-    # If the caller passed the entire seeds dict, accept nested US config too.
     if isinstance(config, dict) and "US" in config and isinstance(config["US"], dict):
         us_cfg = config["US"]
 
@@ -163,13 +196,15 @@ def scrape(fetcher: Fetcher, config: Dict[str, Any]) -> List[EventRecord]:
         or (us_cfg or {}).get("zips")
         or []
     )
-
     zip_codes = [str(z).strip() for z in zips if str(z).strip()]
 
     fetcher.log.info("US parsed zip_codes count=%s sample=%s", len(zip_codes), zip_codes[:5])
 
     if not zip_codes:
-        fetcher.log.warning("US: no zip_codes provided; returning 0 events.")
+        fetcher.log.warning(
+            "US: no zip_codes provided; returning 0 events. Available keys=%s",
+            sorted((us_cfg or {}).keys()) if isinstance(us_cfg, dict) else type(us_cfg),
+        )
         return []
 
     event_ids = discover_event_ids(fetcher, zip_codes, radius)
