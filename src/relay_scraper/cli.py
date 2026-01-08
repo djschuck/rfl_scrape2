@@ -75,7 +75,14 @@ def main(argv: List[str] | None = None) -> int:
     log = setup_logging(args.log)
 
     cfg = load_config(args.config)
-    countries_cfg = cfg.get("countries", {})
+
+    # Support both:
+    # 1) New format: top-level keys per country (US:, AU:, UK:, CA:)
+    # 2) Old format: countries: { US: {...}, AU: {...}, ... }
+    countries_cfg = cfg.get("countries")
+    if not isinstance(countries_cfg, dict):
+        # Fall back to top-level layout
+        countries_cfg = cfg
 
     selected = [c.strip().upper() for c in args.countries.split(",") if c.strip()]
     unknown = [c for c in selected if c not in COUNTRY_DRIVERS]
