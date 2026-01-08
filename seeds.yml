@@ -403,8 +403,9 @@ US:
     - "83001"  # Jackson
     - "82716"  # Gillette
 
-  CA:
-    school_index_urls:
-      - "https://support.cancer.ca/site/PageServer?pagename=RFLY_NW_Events"
-    community_index_urls:
-      - "https://support.cancer.ca/site/PageServer?pagename=RFL_NW_Events"
+CA:
+  enabled: true
+  index_urls:
+    - "https://support.cancer.ca/site/PageServer?pagename=RFL_NW_Events"
+    - "https://support.cancer.ca/site/PageServer?pagename=RFLY_NW_Events"
+  max_pages_per_index: 20
