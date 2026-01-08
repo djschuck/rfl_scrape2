@@ -16,11 +16,392 @@ US:
   enabled: true
   radius_miles: 50
   zip_codes:
-    - "10001"
-    - "30301"
-    - "60601"
-    - "73301"
-    - "94105"
+    # DC
+    - "20001"
+
+    # AL
+    - "35203"  # Birmingham
+    - "36104"  # Montgomery
+    - "36602"  # Mobile
+    - "35801"  # Huntsville
+    - "36830"  # Auburn
+    - "36301"  # Dothan
+
+    # AZ
+    - "85004"  # Phoenix
+    - "85701"  # Tucson
+    - "85281"  # Tempe
+    - "85301"  # Glendale
+    - "86401"  # Kingman
+    - "86001"  # Flagstaff
+
+    # AR
+    - "72201"  # Little Rock
+    - "72701"  # Fayetteville
+    - "72401"  # Jonesboro
+    - "71601"  # Pine Bluff
+    - "71901"  # Hot Springs
+    - "72901"  # Fort Smith
+
+    # CA
+    - "90012"  # Los Angeles
+    - "94103"  # San Francisco
+    - "92101"  # San Diego
+    - "95814"  # Sacramento
+    - "95112"  # San Jose
+    - "93721"  # Fresno
+
+    # CO
+    - "80202"  # Denver
+    - "80903"  # Colorado Springs
+    - "80521"  # Fort Collins
+    - "80302"  # Boulder
+    - "81611"  # Aspen
+    - "81501"  # Grand Junction
+
+    # CT
+    - "06103"  # Hartford
+    - "06510"  # New Haven
+    - "06810"  # Danbury
+    - "06604"  # Bridgeport
+    - "06320"  # New London
+    - "06032"  # Farmington
+
+    # DE
+    - "19801"  # Wilmington
+    - "19901"  # Dover
+    - "19711"  # Newark
+    - "19904"  # Dover area
+    - "19947"  # Georgetown
+    - "19958"  # Lewes
+
+    # FL
+    - "33131"  # Miami
+    - "32801"  # Orlando
+    - "33602"  # Tampa
+    - "32202"  # Jacksonville
+    - "32301"  # Tallahassee
+    - "33701"  # St Petersburg
+
+    # GA
+    - "30303"  # Atlanta
+    - "31401"  # Savannah
+    - "30901"  # Augusta
+    - "31901"  # Columbus
+    - "31201"  # Macon
+    - "30601"  # Athens
+
+    # ID
+    - "83702"  # Boise
+    - "83814"  # Coeur d'Alene
+    - "83201"  # Pocatello
+    - "83301"  # Twin Falls
+    - "83440"  # Rexburg
+    - "83501"  # Lewiston
+
+    # IL
+    - "60601"  # Chicago
+    - "62701"  # Springfield
+    - "61602"  # Peoria
+    - "61820"  # Champaign
+    - "61101"  # Rockford
+    - "62002"  # Alton area
+
+    # IN
+    - "46204"  # Indianapolis
+    - "46802"  # Fort Wayne
+    - "46601"  # South Bend
+    - "47404"  # Bloomington
+    - "47901"  # Lafayette
+    - "47150"  # New Albany
+
+    # IA
+    - "50309"  # Des Moines
+    - "52401"  # Cedar Rapids
+    - "52240"  # Iowa City
+    - "50701"  # Waterloo
+    - "52801"  # Davenport
+    - "51501"  # Council Bluffs
+
+    # KS
+    - "66101"  # Kansas City, KS
+    - "67202"  # Wichita
+    - "66603"  # Topeka
+    - "66044"  # Lawrence
+    - "67401"  # Salina
+    - "67701"  # Colby
+
+    # KY
+    - "40202"  # Louisville
+    - "40507"  # Lexington
+    - "40601"  # Frankfort
+    - "42101"  # Bowling Green
+    - "41011"  # Covington
+    - "41701"  # Hazard
+
+    # LA
+    - "70112"  # New Orleans
+    - "70802"  # Baton Rouge
+    - "71101"  # Shreveport
+    - "70501"  # Lafayette
+    - "70601"  # Lake Charles
+    - "71201"  # Monroe
+
+    # ME
+    - "04101"  # Portland
+    - "04401"  # Bangor
+    - "04330"  # Augusta
+    - "04609"  # Bar Harbor
+    - "04736"  # Caribou
+    - "04005"  # Biddeford
+
+    # MD
+    - "21201"  # Baltimore
+    - "21401"  # Annapolis
+    - "20910"  # Silver Spring
+    - "20850"  # Rockville
+    - "21740"  # Hagerstown
+    - "21801"  # Salisbury
+
+    # MA
+    - "02108"  # Boston
+    - "01608"  # Worcester
+    - "01103"  # Springfield
+    - "02740"  # New Bedford
+    - "01852"  # Lowell
+    - "01201"  # Pittsfield
+
+    # MI
+    - "48226"  # Detroit
+    - "49503"  # Grand Rapids
+    - "48933"  # Lansing
+    - "48104"  # Ann Arbor
+    - "49007"  # Kalamazoo
+    - "49770"  # Petoskey
+
+    # MN
+    - "55401"  # Minneapolis
+    - "55102"  # St Paul
+    - "55802"  # Duluth
+    - "56001"  # Mankato
+    - "56301"  # St Cloud
+    - "56721"  # East Grand Forks
+
+    # MS
+    - "39201"  # Jackson
+    - "39530"  # Biloxi
+    - "38801"  # Tupelo
+    - "39759"  # Starkville
+    - "39180"  # Vicksburg
+    - "39401"  # Hattiesburg
+
+    # MO
+    - "63101"  # St Louis
+    - "64106"  # Kansas City
+    - "65806"  # Springfield
+    - "65201"  # Columbia
+    - "65101"  # Jefferson City
+    - "64501"  # St Joseph
+
+    # MT
+    - "59715"  # Bozeman
+    - "59801"  # Missoula
+    - "59101"  # Billings
+    - "59601"  # Helena
+    - "59901"  # Kalispell
+    - "59401"  # Great Falls
+
+    # NE
+    - "68102"  # Omaha
+    - "68502"  # Lincoln
+    - "68801"  # Grand Island
+    - "68701"  # Norfolk
+    - "69301"  # Alliance
+    - "68025"  # Fremont
+
+    # NV
+    - "89101"  # Las Vegas
+    - "89501"  # Reno
+    - "89701"  # Carson City
+    - "89801"  # Elko
+    - "89030"  # North Las Vegas
+    - "89431"  # Sparks
+
+    # NH
+    - "03101"  # Manchester
+    - "03301"  # Concord
+    - "03801"  # Portsmouth
+    - "03755"  # Hanover
+    - "03431"  # Keene
+    - "03570"  # Berlin
+
+    # NJ
+    - "07102"  # Newark
+    - "08608"  # Trenton
+    - "07302"  # Jersey City
+    - "08901"  # New Brunswick
+    - "08401"  # Atlantic City
+    - "07030"  # Hoboken
+
+    # NM
+    - "87102"  # Albuquerque
+    - "87501"  # Santa Fe
+    - "88001"  # Las Cruces
+    - "87401"  # Farmington
+    - "87701"  # Las Vegas, NM
+    - "88310"  # Alamogordo
+
+    # NY
+    - "10001"  # NYC
+    - "14202"  # Buffalo
+    - "14604"  # Rochester
+    - "13202"  # Syracuse
+    - "12207"  # Albany
+    - "12205"  # Albany area
+
+    # NC
+    - "28202"  # Charlotte
+    - "27601"  # Raleigh
+    - "27701"  # Durham
+    - "27401"  # Greensboro
+    - "28801"  # Asheville
+    - "28401"  # Wilmington
+
+    # ND
+    - "58102"  # Fargo
+    - "58501"  # Bismarck
+    - "58201"  # Grand Forks
+    - "58701"  # Minot
+    - "58601"  # Dickinson
+    - "58301"  # Devils Lake
+
+    # OH
+    - "44114"  # Cleveland
+    - "45202"  # Cincinnati
+    - "43215"  # Columbus
+    - "43604"  # Toledo
+    - "44308"  # Akron
+    - "45402"  # Dayton
+
+    # OK
+    - "73102"  # Oklahoma City
+    - "74103"  # Tulsa
+    - "73701"  # Enid
+    - "73069"  # Norman
+    - "74601"  # Ponca City
+    - "74701"  # Durant
+
+    # OR
+    - "97205"  # Portland
+    - "97401"  # Eugene
+    - "97301"  # Salem
+    - "97501"  # Medford
+    - "97701"  # Bend
+    - "97814"  # La Grande
+
+    # PA
+    - "19103"  # Philadelphia
+    - "15222"  # Pittsburgh
+    - "17101"  # Harrisburg
+    - "18503"  # Scranton
+    - "16801"  # State College
+    - "18101"  # Allentown
+
+    # RI
+    - "02903"  # Providence
+    - "02860"  # Pawtucket
+    - "02840"  # Newport
+    - "02886"  # Warwick
+    - "02809"  # Bristol
+    - "02893"  # West Warwick
+
+    # SC
+    - "29201"  # Columbia
+    - "29401"  # Charleston
+    - "29601"  # Greenville
+    - "29910"  # Bluffton
+    - "29577"  # Myrtle Beach
+    - "29801"  # Aiken
+
+    # SD
+    - "57104"  # Sioux Falls
+    - "57701"  # Rapid City
+    - "57501"  # Pierre
+    - "57401"  # Aberdeen
+    - "57006"  # Brookings
+    - "57301"  # Mitchell
+
+    # TN
+    - "37219"  # Nashville
+    - "38103"  # Memphis
+    - "37902"  # Knoxville
+    - "37402"  # Chattanooga
+    - "37604"  # Johnson City
+    - "37064"  # Franklin
+
+    # TX
+    - "73301"  # Austin
+    - "77002"  # Houston
+    - "75201"  # Dallas
+    - "78205"  # San Antonio
+    - "76102"  # Fort Worth
+    - "79901"  # El Paso
+
+    # UT
+    - "84111"  # Salt Lake City
+    - "84601"  # Provo
+    - "84101"  # SLC area
+    - "84770"  # St George
+    - "84401"  # Ogden
+    - "84321"  # Logan
+
+    # VT
+    - "05401"  # Burlington
+    - "05602"  # Montpelier
+    - "05701"  # Rutland
+    - "05301"  # Brattleboro
+    - "05001"  # White River Junction
+    - "05819"  # St Johnsbury
+
+    # VA
+    - "23219"  # Richmond
+    - "22201"  # Arlington
+    - "23510"  # Norfolk
+    - "24011"  # Roanoke
+    - "22903"  # Charlottesville
+    - "24541"  # Danville
+
+    # WA
+    - "98101"  # Seattle
+    - "99201"  # Spokane
+    - "98660"  # Vancouver, WA
+    - "98501"  # Olympia
+    - "98402"  # Tacoma
+    - "98901"  # Yakima
+
+    # WV
+    - "25301"  # Charleston
+    - "26505"  # Morgantown
+    - "25701"  # Huntington
+    - "26003"  # Wheeling
+    - "25801"  # Beckley
+    - "26101"  # Parkersburg
+
+    # WI
+    - "53202"  # Milwaukee
+    - "53703"  # Madison
+    - "54303"  # Green Bay
+    - "54701"  # Eau Claire
+    - "54911"  # Appleton
+    - "53403"  # Racine
+
+    # WY
+    - "82001"  # Cheyenne
+    - "82601"  # Casper
+    - "82901"  # Rock Springs
+    - "82801"  # Sheridan
+    - "83001"  # Jackson
+    - "82716"  # Gillette
 
   CA:
     school_index_urls:
