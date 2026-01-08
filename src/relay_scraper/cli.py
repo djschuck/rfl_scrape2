@@ -96,7 +96,8 @@ def main(argv: List[str] | None = None) -> int:
     try:
         for c in selected:
             driver = COUNTRY_DRIVERS[c]
-            c_cfg = countries_cfg.get(c, {})
+            # Prefer cfg["countries"][c] if present, otherwise fall back to top-level cfg[c]
+            c_cfg = (countries_cfg.get(c) if isinstance(countries_cfg, dict) else None) or cfg.get(c, {}) or {}
             log.info("Scraping %s ...", c)
             recs = driver(fetcher, c_cfg)
             log.info("%s records: %s", c, len(recs))
