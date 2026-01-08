@@ -134,7 +134,6 @@ def parse_event_page(fetcher: Fetcher, url: str) -> Optional[EventRecord]:
         source_url=url,
     )
 
-
 def scrape(fetcher: Fetcher, config: Dict[str, Any]) -> List[EventRecord]:
     """
     Entrypoint used by cli.py: {"US": us.scrape}
@@ -154,7 +153,7 @@ def scrape(fetcher: Fetcher, config: Dict[str, Any]) -> List[EventRecord]:
     us_cfg = config
     # If the caller passed the entire seeds dict, accept nested US config too.
     if isinstance(config, dict) and "US" in config and isinstance(config["US"], dict):
-    us_cfg = config["US"]
+        us_cfg = config["US"]
 
     radius = int((us_cfg or {}).get("radius_miles", 50))
 
