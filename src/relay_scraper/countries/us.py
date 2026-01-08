@@ -147,11 +147,27 @@ def scrape(fetcher: Fetcher, config: Dict[str, Any]) -> List[EventRecord]:
         - "10001"
         - "30301"
     """
-    radius = int(config.get("radius_miles", 50))
-    zips = config.get("zip_codes") or config.get("zips") or []
+    fetcher.log.info("US raw config received: %r", config)
+    if isinstance(config, dict):
+    fetcher.log.info("US config keys: %s", sorted(config.keys()))
 
-    # Ensure zips are strings (YAML can parse as ints)
+    us_cfg = config
+    # If the caller passed the entire seeds dict, accept nested US config too.
+    if isinstance(config, dict) and "US" in config and isinstance(config["US"], dict):
+    us_cfg = config["US"]
+
+    radius = int((us_cfg or {}).get("radius_miles", 50))
+
+    zips = (
+        (us_cfg or {}).get("zip_codes")
+        or (us_cfg or {}).get("zipCodes")
+        or (us_cfg or {}).get("zips")
+        or []
+    )
+
     zip_codes = [str(z).strip() for z in zips if str(z).strip()]
+
+    fetcher.log.info("US parsed zip_codes count=%s sample=%s", len(zip_codes), zip_codes[:5])
 
     if not zip_codes:
         fetcher.log.warning("US: no zip_codes provided; returning 0 events.")
