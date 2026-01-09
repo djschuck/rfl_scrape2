@@ -2,9 +2,30 @@ name: Scrape Relay For Life Events
 
 on:
   workflow_dispatch:
-  schedule:
+    inputs:
+      run_au:
+        description: "Run AU"
+        type: boolean
+        default: true
+      run_uk:
+        description: "Run UK"
+        type: boolean
+        default: true
+      run_us:
+        description: "Run US"
+        type: boolean
+        default: true
+      run_ca:
+        description: "Run CA"
+        type: boolean
+        default: true
+      out_prefix:
+        description: "Output file prefix (optional)"
+        type: string
+        default: "events"
+  #schedule:
     # Daily at 03:23 UTC
-    - cron: "23 3 * * *"
+    #- cron: "23 3 * * *"
 
 jobs:
   scrape:
@@ -37,17 +58,43 @@ jobs:
           echo "---- find seeds.yml ----"
           find . -maxdepth 3 -type f -name "seeds.yml" -print
 
+      - name: Build country list
+        id: countries
+        shell: bash
+        run: |
+          COUNTRIES=""
+          if [[ "${{ inputs.run_au }}" == "true" ]]; then COUNTRIES="${COUNTRIES},AU"; fi
+          if [[ "${{ inputs.run_uk }}" == "true" ]]; then COUNTRIES="${COUNTRIES},UK"; fi
+          if [[ "${{ inputs.run_us }}" == "true" ]]; then COUNTRIES="${COUNTRIES},US"; fi
+          if [[ "${{ inputs.run_ca }}" == "true" ]]; then COUNTRIES="${COUNTRIES},CA"; fi
+
+          # strip leading comma
+          COUNTRIES="${COUNTRIES#,}"
+
+          if [[ -z "$COUNTRIES" ]]; then
+            echo "No countries selected. Exiting."
+            exit 1
+          fi
+
+          echo "countries=$COUNTRIES" >> "$GITHUB_OUTPUT"
+          echo "Selected: $COUNTRIES"
+
       - name: Run scraper
         env:
           PYTHONUNBUFFERED: "1"
         run: |
           mkdir -p out
-          relay-scrape --config seeds.yml --countries AU,UK,US,CA --out out/events.csv --json out/events.json --log out/scrape.log
-
+          relay-scrape \
+            --config seeds.yml \
+            --countries "${{ steps.countries.outputs.countries }}" \
+            --out "out/${{ inputs.out_prefix }}.csv" \
+            --json "out/${{ inputs.out_prefix }}.json" \
+            --log "out/scrape.log"
+            
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: relay-events
           path: out/
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 120
