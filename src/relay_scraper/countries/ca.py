@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import List, Set, Optional, Dict, Any
 import re
-from urllib.parse import urljoin, urlparse, parse_qs, urlencode, urlunparse
+from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup
 
@@ -10,44 +10,39 @@ from relay_scraper.core.fetch import Fetcher
 from relay_scraper.core.models import EventRecord
 from relay_scraper.core.extract import extract_emails
 from relay_scraper.core.normalize import normalize_date
-from relay_scraper.core.utils import absolutize, is_http_url
+from relay_scraper.core.utils import absolutize
 
 CA_COUNTRY = "CA"
 
 # Robustly capture fr_id in many encodings/forms:
-# fr_id=123, fr_id%3D123, fr_id\u003d123, "fr_id":123, fr_id&#61;123, fr_id&amp;... (rare)
+# fr_id=123
+# fr_id%3D123
+# fr_id\u003d123   (in JSON strings)
+# fr_id&#61;123     (HTML entity "=")
+# fr_id&#x3D;123
+# "fr_id":123
+#
+# Note: keep this regex simple and NOT in VERBOSE mode to avoid compile pitfalls.
 FR_ID_RE = re.compile(
-    r"""
-    (?:
-        fr_id(?:=|%3D|\\u003d|&#61;|&#x3D;)
-        |
-        "fr_id"\s*:\s*
-    )
-    \s*("?)(\d+)\1
-    """,
-    re.IGNORECASE | re.VERBOSE,
+    r'(?:fr_id(?:=|%3[Dd]|\\u003[dD]|&#61;|&#x3[Dd];)\s*("?)(\d+)\1|'
+    r'"fr_id"\s*:\s*("?)(\d+)\3)',
+    re.IGNORECASE,
 )
 
-# Direct event page URLs (sometimes present as anchors)
+# Direct event page URLs sometimes appear explicitly
 EVENT_URL_RE = re.compile(
-    r"""(?P<url>
-        https?://support\.cancer\.ca/site/TR/[^"'<> ]+?\bpg=entry\b[^"'<> ]*?\bfr_id=\d+
-        |
-        /site/TR/[^"'<> ]+?\bpg=entry\b[^"'<> ]*?\bfr_id=\d+
-    )""",
-    re.IGNORECASE | re.VERBOSE,
+    r'(?:(https?://support\.cancer\.ca/site/TR/[^"\'<> ]+?pg=entry[^"\'<> ]*?fr_id=\d+)'
+    r'|(/site/TR/[^"\'<> ]+?pg=entry[^"\'<> ]*?fr_id=\d+))',
+    re.IGNORECASE,
 )
 
-# Month-ish fallback for date candidate scanning
 MONTH_RE = re.compile(
     r"\b(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|"
     r"Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\b",
     re.IGNORECASE,
 )
-
 TBD_RE = re.compile(r"\b(TBD|TBA|TBC)\b", re.IGNORECASE)
 DATE_LABEL_RE = re.compile(r"\b(Event\s*Date|Date)\b", re.IGNORECASE)
-
 
 DEFAULT_COMMUNITY_ENTRY_TEMPLATE = (
     "https://support.cancer.ca/site/TR/RelayForLife/RFL_NW_even_?pg=entry&fr_id={fr_id}&s_locale=en_CA"
@@ -76,15 +71,14 @@ def _extract_event_urls_from_html(base_url: str, html: str) -> Set[str]:
             found.add(u)
 
     for m in EVENT_URL_RE.finditer(html):
-        raw = m.group("url")
-        if not raw:
+        abs_u = m.group(1)
+        rel_u = m.group(2)
+        u = abs_u or rel_u
+        if not u:
             continue
-        u = raw.strip()
         if u.startswith("/"):
             u = urljoin(base_url, u)
-        u = u.split("#", 1)[0]
-        if "pg=entry" in u and "fr_id=" in u:
-            found.add(u)
+        found.add(u.split("#", 1)[0])
 
     return found
 
@@ -93,7 +87,11 @@ def _extract_fr_ids_from_html(html: str) -> Set[str]:
     """Extract fr_id values even if links aren’t present as <a href>."""
     ids: Set[str] = set()
     for m in FR_ID_RE.finditer(html):
-        ids.add(m.group(2))
+        # Pattern has two alternative capture locations
+        if m.group(2):
+            ids.add(m.group(2))
+        elif m.group(4):
+            ids.add(m.group(4))
     return ids
 
 
@@ -194,16 +192,13 @@ def scrape(fetcher: Fetcher, config: Dict[str, Any]) -> List[EventRecord]:
 
         html = res.text
 
-        # 1) Explicit event links if present
         explicit = _extract_event_urls_from_html(idx, html)
         fetcher.log.info("CA index explicit event links found: %s", len(explicit))
         all_urls.update(explicit)
 
-        # 2) Extract fr_ids from HTML/JS and build entry URLs
         fr_ids = _extract_fr_ids_from_html(html)
         fetcher.log.info("CA index fr_id values found: %s", len(fr_ids))
 
-        # Decide which template to use based on the index pagename
         use_template = schools_template if "pagename=RFLY_" in idx else community_template
 
         built = 0
