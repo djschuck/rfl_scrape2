@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from typing import List, Set, Optional, Dict, Any, Tuple
+from typing import List, Set, Optional, Dict, Any
 import re
-from urllib.parse import urljoin, urlparse, parse_qs
+from urllib.parse import urljoin, urlparse, parse_qs, urlencode, urlunparse
 
 from bs4 import BeautifulSoup
 
@@ -14,9 +14,21 @@ from relay_scraper.core.utils import absolutize, is_http_url
 
 CA_COUNTRY = "CA"
 
-# Luminate-style event pages typically look like:
-# https://support.cancer.ca/site/TR/RelayForLife/RFLY_NW_odd_?pg=entry&fr_id=30883
-# ...or variants of /site/TR/... with fr_id and pg=entry.
+# Robustly capture fr_id in many encodings/forms:
+# fr_id=123, fr_id%3D123, fr_id\u003d123, "fr_id":123, fr_id&#61;123, fr_id&amp;... (rare)
+FR_ID_RE = re.compile(
+    r"""
+    (?:
+        fr_id(?:=|%3D|\\u003d|&#61;|&#x3D;)
+        |
+        "fr_id"\s*:\s*
+    )
+    \s*("?)(\d+)\1
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+
+# Direct event page URLs (sometimes present as anchors)
 EVENT_URL_RE = re.compile(
     r"""(?P<url>
         https?://support\.cancer\.ca/site/TR/[^"'<> ]+?\bpg=entry\b[^"'<> ]*?\bfr_id=\d+
@@ -26,6 +38,7 @@ EVENT_URL_RE = re.compile(
     re.IGNORECASE | re.VERBOSE,
 )
 
+# Month-ish fallback for date candidate scanning
 MONTH_RE = re.compile(
     r"\b(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|"
     r"Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\b",
@@ -33,27 +46,27 @@ MONTH_RE = re.compile(
 )
 
 TBD_RE = re.compile(r"\b(TBD|TBA|TBC)\b", re.IGNORECASE)
-
-# Sometimes the page includes multiple places with dates; we want the first "event date"
 DATE_LABEL_RE = re.compile(r"\b(Event\s*Date|Date)\b", re.IGNORECASE)
 
 
+DEFAULT_COMMUNITY_ENTRY_TEMPLATE = (
+    "https://support.cancer.ca/site/TR/RelayForLife/RFL_NW_even_?pg=entry&fr_id={fr_id}&s_locale=en_CA"
+)
+DEFAULT_SCHOOLS_ENTRY_TEMPLATE = (
+    "https://support.cancer.ca/site/TR/RelayForLife/RFLY_NW_odd_?pg=entry&fr_id={fr_id}&s_locale=en_CA"
+)
+
+
 def _canon_url(base: str, href: str) -> str:
-    """Absolute URL + strip fragment."""
     u = absolutize(base, href)
     return u.split("#", 1)[0]
 
 
 def _extract_event_urls_from_html(base_url: str, html: str) -> Set[str]:
-    """
-    Extract event URLs from both anchors and raw HTML regex.
-    This is key for Canada where links can appear in scripts / unusual markup.
-    """
+    """Extract explicit event URLs from anchors + raw regex."""
     found: Set[str] = set()
-
     soup = BeautifulSoup(html, "lxml")
 
-    # 1) Normal anchors
     for a in soup.select("a[href]"):
         href = (a.get("href") or "").strip()
         if not href:
@@ -62,17 +75,13 @@ def _extract_event_urls_from_html(base_url: str, html: str) -> Set[str]:
         if "support.cancer.ca/site/TR/" in u and "pg=entry" in u and "fr_id=" in u:
             found.add(u)
 
-    # 2) Raw regex over full HTML (captures links in JS, data attrs, etc.)
     for m in EVENT_URL_RE.finditer(html):
         raw = m.group("url")
         if not raw:
             continue
         u = raw.strip()
-
-        # If it's relative, join to base
         if u.startswith("/"):
             u = urljoin(base_url, u)
-
         u = u.split("#", 1)[0]
         if "pg=entry" in u and "fr_id=" in u:
             found.add(u)
@@ -80,63 +89,16 @@ def _extract_event_urls_from_html(base_url: str, html: str) -> Set[str]:
     return found
 
 
-def _find_next_page_url(base_url: str, html: str) -> Optional[str]:
-    """
-    Attempt to follow pagination on PageServer indexes.
-    We look for a 'Next' link or rel=next.
-    """
-    soup = BeautifulSoup(html, "lxml")
-
-    # rel=next
-    a = soup.select_one("a[rel='next'][href]")
-    if a:
-        return _canon_url(base_url, a["href"])
-
-    # visible "Next" link
-    for a in soup.select("a[href]"):
-        txt = (a.get_text(" ", strip=True) or "").lower()
-        if txt in {"next", "next >", ">", "›"}:
-            return _canon_url(base_url, a.get("href") or "")
-
-    return None
+def _extract_fr_ids_from_html(html: str) -> Set[str]:
+    """Extract fr_id values even if links aren’t present as <a href>."""
+    ids: Set[str] = set()
+    for m in FR_ID_RE.finditer(html):
+        ids.add(m.group(2))
+    return ids
 
 
-def discover_event_urls(fetcher: Fetcher, index_urls: List[str], max_pages_per_index: int = 20) -> List[str]:
-    """
-    Fetch each index URL, extract event links, and follow pagination (if any).
-    """
-    all_found: Set[str] = set()
-
-    for idx in index_urls:
-        fetcher.log.info("CA index: %s", idx)
-
-        seen_pages: Set[str] = set()
-        page_url = idx
-
-        for page_num in range(1, max_pages_per_index + 1):
-            if page_url in seen_pages:
-                fetcher.log.info("CA index pagination loop detected; stopping at page %s", page_num)
-                break
-            seen_pages.add(page_url)
-
-            res = fetcher.get_text(page_url)
-            fetcher.log.info("CA index fetch status=%s url=%s", res.status_code, page_url)
-            if res.status_code != 200:
-                # If the site blocks bots, this will show up here
-                fetcher.log.warning("CA index non-200 (%s) for %s", res.status_code, page_url)
-                break
-
-            html = res.text
-            found_here = _extract_event_urls_from_html(page_url, html)
-            fetcher.log.info("CA index page %s found event links: %s", page_num, len(found_here))
-            all_found.update(found_here)
-
-            next_url = _find_next_page_url(page_url, html)
-            if not next_url or next_url == page_url:
-                break
-            page_url = next_url
-
-    return sorted(all_found)
+def _build_entry_url(template: str, fr_id: str) -> str:
+    return template.format(fr_id=fr_id)
 
 
 def _extract_event_name(soup: BeautifulSoup) -> str:
@@ -149,41 +111,32 @@ def _extract_event_name(soup: BeautifulSoup) -> str:
     if title:
         t = title.get_text(" ", strip=True)
         if t:
-            # Often "XYZ - Canadian Cancer Society" etc
             return t.strip()
     return "(unknown)"
 
 
 def _extract_date_candidate(text: str) -> str:
-    """
-    From full page text, attempt to find an 'event date' candidate string.
-    Canada pages can be template-y; we aim for something normalize_date() can handle.
-    """
     if not text:
         return ""
 
-    # TBD/TBA/TBC
     m = TBD_RE.search(text)
     if m:
         return m.group(1).upper()
 
-    # Prefer lines near "Event Date"
     lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+
     for i, ln in enumerate(lines):
         if DATE_LABEL_RE.search(ln):
-            # Try same line after colon
             if ":" in ln:
                 tail = ln.split(":", 1)[1].strip()
                 if tail:
                     return tail
-            # Try next 1-2 lines
             for j in (i + 1, i + 2):
                 if j < len(lines):
                     cand = lines[j]
                     if MONTH_RE.search(cand) or re.search(r"\b20\d{2}\b", cand):
                         return cand
 
-    # Fallback: first line that looks date-ish (month + year)
     for ln in lines:
         if MONTH_RE.search(ln) and re.search(r"\b20\d{2}\b", ln):
             return ln
@@ -202,14 +155,12 @@ def parse_event_page(fetcher: Fetcher, url: str) -> Optional[EventRecord]:
 
     name = _extract_event_name(soup)
 
-    # Date extraction from visible text
     page_text = soup.get_text("\n", strip=True)
     date_raw = _extract_date_candidate(page_text)
-
     nd = normalize_date(date_raw, CA_COUNTRY)
+
     emails = sorted(extract_emails(html))
 
-    # Keep record if anything meaningful exists
     if (not name or name == "(unknown)") and not emails and not (nd.raw or nd.iso):
         return None
 
@@ -224,20 +175,44 @@ def parse_event_page(fetcher: Fetcher, url: str) -> Optional[EventRecord]:
 
 
 def scrape(fetcher: Fetcher, config: Dict[str, Any]) -> List[EventRecord]:
-    """
-    Config expected (either):
-      CA:
-        index_urls: [...]
-        max_pages_per_index: 20
-    """
     index_urls = config.get("index_urls", [])
-    max_pages = int(config.get("max_pages_per_index", 20))
-
     if not index_urls:
         fetcher.log.warning("CA: no index_urls provided; returning 0 events.")
         return []
 
-    urls = discover_event_urls(fetcher, index_urls=index_urls, max_pages_per_index=max_pages)
+    community_template = config.get("community_entry_template", DEFAULT_COMMUNITY_ENTRY_TEMPLATE)
+    schools_template = config.get("schools_entry_template", DEFAULT_SCHOOLS_ENTRY_TEMPLATE)
+
+    all_urls: Set[str] = set()
+
+    for idx in index_urls:
+        fetcher.log.info("CA index: %s", idx)
+        res = fetcher.get_text(idx)
+        fetcher.log.info("CA index fetch status=%s url=%s", res.status_code, idx)
+        if res.status_code != 200:
+            continue
+
+        html = res.text
+
+        # 1) Explicit event links if present
+        explicit = _extract_event_urls_from_html(idx, html)
+        fetcher.log.info("CA index explicit event links found: %s", len(explicit))
+        all_urls.update(explicit)
+
+        # 2) Extract fr_ids from HTML/JS and build entry URLs
+        fr_ids = _extract_fr_ids_from_html(html)
+        fetcher.log.info("CA index fr_id values found: %s", len(fr_ids))
+
+        # Decide which template to use based on the index pagename
+        use_template = schools_template if "pagename=RFLY_" in idx else community_template
+
+        built = 0
+        for fr_id in fr_ids:
+            all_urls.add(_build_entry_url(use_template, fr_id))
+            built += 1
+        fetcher.log.info("CA index built entry urls from fr_id: %s", built)
+
+    urls = sorted(all_urls)
     fetcher.log.info("CA discovered event urls=%s", len(urls))
 
     records: List[EventRecord] = []
