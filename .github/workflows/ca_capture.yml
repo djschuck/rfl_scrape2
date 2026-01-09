@@ -1,0 +1,32 @@
+name: CA network capture (manual)
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install project + Playwright
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+          pip install playwright
+          python -m playwright install --with-deps chromium
+
+      - name: Run CA network capture
+        run: |
+          mkdir -p out
+          python scripts/ca_capture_index_network.py --outdir out --headless
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ca-network-capture
+          path: out/
