@@ -408,4 +408,7 @@ CA:
   index_urls:
     - "https://support.cancer.ca/site/PageServer?pagename=RFL_NW_Events"
     - "https://support.cancer.ca/site/PageServer?pagename=RFLY_NW_Events"
-  max_pages_per_index: 20
+  # Optional override (defaults match these)
+  community_entry_template: "https://support.cancer.ca/site/TR/RelayForLife/RFL_NW_even_?pg=entry&fr_id={fr_id}&s_locale=en_CA"
+  schools_entry_template: "https://support.cancer.ca/site/TR/RelayForLife/RFLY_NW_odd_?pg=entry&fr_id={fr_id}&s_locale=en_CA"
+
